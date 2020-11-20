@@ -139,6 +139,10 @@ class VertexMorphingMethod:
         model_part.AddNodalSolutionStepVariable(KSO.MESH_CHANGE)
         model_part.AddNodalSolutionStepVariable(KM.NORMAL)
         model_part.AddNodalSolutionStepVariable(KSO.NORMALIZED_SURFACE_NORMAL)
+        model_part.AddNodalSolutionStepVariable(KSO.CSM_GRADIENT)
+        model_part.AddNodalSolutionStepVariable(KSO.CSM_GRADIENT_MAPPED)
+        model_part.AddNodalSolutionStepVariable(KSO.CFD_GRADIENT)
+        model_part.AddNodalSolutionStepVariable(KSO.CFD_GRADIENT_MAPPED)
 
     def __AddVariablesToBeUsedByDesignVariables(self):
         if self.optimization_settings["design_variables"]["filter"].Has("in_plane_morphing") and \
