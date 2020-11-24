@@ -21,6 +21,7 @@ from decimal import Decimal
 # Read parameters
 with open("parameters_fsi_optimization.json",'r') as parameter_file:
     parameters = km.Parameters(parameter_file.read())
+    parameters["optimization_settings"]["optimization_algorithm"]["max_iterations"].SetInt(1)
 
 # Create Model
 optimization_model = km.Model()
@@ -241,6 +242,8 @@ class CustomAnalyzer(AnalyzerBaseClass):
                 dummy_gradient = {node.Id: [0,0,0] for node in current_design.Nodes}
                 communicator.reportGradient("mean_stress", dummy_gradient)
 
+            self.__WriteCoupledGradientsToTxt(mdpa=current_design, dimensions=self.interface_su2.su2_mesh_data["NDIME"])
+
     # -------------------------------------------------------------------------------------------------------------------------------------------------------------
     @staticmethod
     def __RemoveVariableFromCoordinates(variable, model_part):
@@ -269,22 +272,15 @@ class CustomAnalyzer(AnalyzerBaseClass):
     def __ReadAndDimensionalizeFluidResults(self, opt_itr):
         file_with_pressures = "DESIGNS/DSN_"+str(opt_itr).zfill(3)+"/DIRECT/"+self.SURFACE_FLOW_FILENAME+".csv"
         if self.interface_su2.su2_mesh_data["NDIME"] == 2:
-            nodal_forces = self.interface_su2.ReadNodalValuesFromCSVFile(file_with_pressures,0,[5,6],1)
+            nodal_forces = self.interface_su2.ReadNodalValuesFromCSVFile(file_with_pressures,0,[9,10],1)
             nodal_forces = {key: [value[0],value[1],0.0] for key, value in nodal_forces.items()}
-            nodal_force_densities = self.interface_su2.ReadNodalValuesFromCSVFile(file_with_pressures,0,[7,8],1)
-            nodal_force_densities = {key: [value[0],value[1],0.0] for key, value in nodal_force_densities.items()}
         else:
-            nodal_forces = self.interface_su2.ReadNodalValuesFromCSVFile(file_with_pressures,0,[6,7,8],1)
-            nodal_force_densities = self.interface_su2.ReadNodalValuesFromCSVFile(file_with_pressures,0,[9,10,11],1)
+            raise RuntimeError("Reading of nodal forces from SU2 not yet implemented for 3D case!")
 
         for node in self.cfd_interface_part.Nodes:
             force = nodal_forces[node.Id]
             dimensional_force = [value*self.reference_pressure for value in force]
             node.SetSolutionStepValue(kcsm.POINT_LOAD, dimensional_force)
-
-            # traction = nodal_force_densities[node.Id]
-            # dimensional_traction = [value*self.reference_pressure for value in traction]
-            # node.SetSolutionStepValue(kso.TRACTION, dimensional_traction)
 
     # -------------------------------------------------------------------------------------------------------------------------------------------------------------
     def __RunCSM(self, opt_itr, new_mesh, displacements):
@@ -379,9 +375,11 @@ class CustomAnalyzer(AnalyzerBaseClass):
         # Some postprocessing
         primal_gid_results_filename = "primal_results.post.bin"
         adjoint_results_filename = "adjoint_results.post.bin"
+        primal_vtk_results_foldername = "primal_csm_results"
         self.__OutputMdpaAsGid(csm.adjoint_model_part, adjoint_results_filename.replace(".post.bin",""), self.adjoint_output_parameters)
         self.__CopyBinFileToResultsFolder(primal_gid_results_filename, opt_itr)
         self.__CopyBinFileToResultsFolder(adjoint_results_filename, opt_itr)
+        self.__CopyFolderToResultsFolder(primal_vtk_results_foldername, opt_itr)
 
         print("> Finished __RunCSM in" ,round( time.time()-start_time, 3 ), " s.")
 
@@ -416,7 +414,7 @@ class CustomAnalyzer(AnalyzerBaseClass):
                 else:
                     adjoint_disp = [0,0,0]
 
-                line_to_write = line[:-1]
+                line_to_write = line
 
                 if self.interface_su2.su2_mesh_data["NDIME"] == 2:
                     line_to_write[-2] = '%.15E' % Decimal(str(adjoint_disp[0]))
@@ -459,6 +457,12 @@ class CustomAnalyzer(AnalyzerBaseClass):
         shutil.move(new_name, self.results_folder)
 
     # -------------------------------------------------------------------------------------------------------------------------------------------------------------
+    def __CopyFolderToResultsFolder(self, folder_name, optimization_iteration):
+        new_name = folder_name + "_DESIGN_"+str(optimization_iteration)
+        os.rename(folder_name,new_name)
+        shutil.move(new_name, self.results_folder)
+
+    # -------------------------------------------------------------------------------------------------------------------------------------------------------------
     @staticmethod
     def __OutputMdpaAsGid( output_mdpa, output_filename, parameters ):
         gid_output_original = GiDOutputProcess( output_mdpa, output_filename, parameters )
@@ -468,6 +472,32 @@ class CustomAnalyzer(AnalyzerBaseClass):
         gid_output_original.PrintOutput()
         gid_output_original.ExecuteFinalizeSolutionStep()
         gid_output_original.ExecuteFinalize()
+
+    # -------------------------------------------------------------------------------------------------------------------------------------------------------------
+    @staticmethod
+    def __WriteCoupledGradientsToTxt( mdpa, dimensions ):
+        with open("coupled_gradients_by_adjoint_calc.txt", 'w') as outfile:
+            if dimensions == 2:
+                line_to_write = ["node_id", "DC1DX_MAPPED_X", "DC1DX_MAPPED_Y"]
+            else:
+                line_to_write = ["node_id", "DC1DX_MAPPED_X", "DC1DX_MAPPED_Y", "DC1DX_MAPPED_Z"]
+
+            for entry in line_to_write[:-1]:
+                outfile.write(entry+", ")
+            outfile.write(line_to_write[-1]+"\n")
+
+            for node in mdpa.Nodes:
+                node_id = node.Id
+                grad = node.GetSolutionStepValue(kso.DC1DX_MAPPED)
+                if dimensions == 2:
+                    line_to_write = [str(node.Id), str(grad[0]), str(grad[1])]
+                else:
+                    line_to_write = [str(node.Id), str(grad[0]), str(grad[1]), str(grad[2])]
+
+                for entry in line_to_write[:-1]:
+                    outfile.write(entry+", ")
+                outfile.write(line_to_write[-1]+"\n")      
+
 
 # =================================================================================================================================================================
 # Perform optimization
