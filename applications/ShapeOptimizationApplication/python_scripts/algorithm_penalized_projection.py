@@ -29,11 +29,12 @@ class AlgorithmPenalizedProjection(OptimizationAlgorithm):
     def __init__(self, optimization_settings, analyzer, communicator, model_part_controller):
         default_algorithm_settings = KM.Parameters("""
         {
-            "name"                    : "penalized_projection",
-            "correction_scaling"      : 1.0,
-            "use_adaptive_correction" : true,
-            "max_iterations"          : 100,
-            "relative_tolerance"      : 1e-3,
+            "name"                         : "penalized_projection",
+            "correction_scaling"           : 1.0,
+            "use_adaptive_correction"      : true,
+            "max_iterations"               : 100,
+            "relative_tolerance"           : 1e-3,
+            "external_sensitivity_mapping" : false,
             "line_search" : {
                 "line_search_type"           : "manual_stepping",
                 "normalize_search_direction" : true,
@@ -61,6 +62,8 @@ class AlgorithmPenalizedProjection(OptimizationAlgorithm):
         self.step_size = self.algorithm_settings["line_search"]["step_size"].GetDouble()
         self.max_iterations = self.algorithm_settings["max_iterations"].GetInt() + 1
         self.relative_tolerance = self.algorithm_settings["relative_tolerance"].GetDouble()
+
+        self.external_sensitivity_mapping = self.algorithm_settings["external_sensitivity_mapping"].GetBool()
 
         self.optimization_model_part = model_part_controller.GetOptimizationModelPart()
         self.optimization_model_part.AddNodalSolutionStepVariable(KSO.SEARCH_DIRECTION)
@@ -162,8 +165,9 @@ class AlgorithmPenalizedProjection(OptimizationAlgorithm):
     # --------------------------------------------------------------------------
     def __computeShapeUpdate(self):
         self.mapper.Update()
-        self.mapper.InverseMap(KSO.DF1DX, KSO.DF1DX_MAPPED)
-        self.mapper.InverseMap(KSO.DC1DX, KSO.DC1DX_MAPPED)
+        if not self.external_sensitivity_mapping:
+            self.mapper.InverseMap(KSO.DF1DX, KSO.DF1DX_MAPPED)
+            self.mapper.InverseMap(KSO.DC1DX, KSO.DC1DX_MAPPED)
 
         constraint_value = self.communicator.getStandardizedValue(self.constraints[0]["identifier"].GetString())
         if self.__isConstraintActive(constraint_value):
